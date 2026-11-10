@@ -1,0 +1,78 @@
+name: Enterprise CI & QA Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  qa_and_security:
+    name: Security, Linting & QA
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Code Formatting Check
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy Linter
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Audit Dependencies for CVEs
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  core_engine_tests:
+    name: Core Engine & Range Scheduler Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Unit Tests for mdm-engine
+        run: cargo test -p mdm-engine --verbose
+
+      - name: Run Unit Tests for mdm-cli
+        run: cargo test -p mdm-cli --verbose
+
+      - name: Run Unit Tests for mdm-ipc
+        run: cargo test -p mdm-ipc --verbose
+
+  container_build:
+    name: Enterprise Headless Container Build
+    runs-on: ubuntu-latest
+    needs: [qa_and_security, core_engine_tests]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Headless Enterprise Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.enterprise
+          push: false
+          tags: misterdownloadmanager/enterprise:latest
